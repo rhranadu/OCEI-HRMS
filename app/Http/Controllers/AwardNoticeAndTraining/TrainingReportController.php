@@ -1,0 +1,132 @@
+<?php
+
+namespace App\Http\Controllers\AwardNoticeAndTraining;
+
+use App\Http\Controllers\Controller;
+
+use Barryvdh\DomPDF\Facade as PDF;
+
+use App\Model\PrintHeadSetting;
+
+use App\Model\TrainingType;
+
+use Illuminate\Http\Request;
+
+use App\Model\TrainingInfo;
+
+use App\Model\Employee;
+use Illuminate\Support\Facades\DB;
+
+class TrainingReportController extends Controller
+{
+
+
+    public function employeeTrainingReport(Request $request)
+    {
+        $employeeList = Employee::where('status', 1)->get();
+        $data = [];
+
+        if ($request->employee_id) {
+            $data = $this->employeeTrainingDataFormat($request->employee_id);
+        }
+
+        return view('admin.training.report.employeeTrainingReport', ['employeeList' => $employeeList, 'results' => $data, 'employee_id' => $request->employee_id]);
+    }
+
+
+
+    public function employeeTrainingDataFormat($employee_id)
+    {
+        $trainingType = TrainingType::where('status', 1)->get()->toArray();
+        $trainingInfo = TrainingInfo::where('employee_id', $employee_id)->where('status',1)->get();
+        $arrayFormat = [];
+        foreach ($trainingInfo as $value) {
+            $temp = [];
+            $hasData = array_search($value->training_type_id, array_column($trainingType, 'training_type_id'));
+            //dd($hasData , $value->training_type_id);
+            if (gettype($hasData) == 'integer') {
+                $temp['training_type_name'] = $trainingType[$hasData]['training_type_name'];
+                $temp['action']             = "Yes";
+                $temp['subject']            = $value->subject;
+                $temp['organization_name']  = $value->organization_name;
+                $temp['start_date']         = $value->start_date;
+                $temp['end_date']           = $value->end_date;
+                $temp['start_time']         = $value->start_time;
+                $temp['end_time']           = $value->end_time;
+                $temp['training_day']       = $value->training_day;
+                $temp['training_hour']      = $value->training_hour;
+                $temp['certificate']        = $value->certificate;
+            } else {
+                $temp['training_type_name'] = $trainingType[$hasData]['training_type_name'];
+                $temp['action']             = "No";
+                $temp['subject']            = '';
+                $temp['organization_name']  = '';
+                $temp['start_date']         = '';
+                $temp['end_date']           = '';
+                $temp['start_time']         = '';
+                $temp['end_time']           = '';
+                $temp['training_day']       = '';
+                $temp['training_hour']      = '';
+                $temp['certificate']        = '';
+            }
+
+            if($temp['action'] != 'No'){
+                $arrayFormat[] = $temp;
+            }
+        }
+        
+
+        return $arrayFormat;
+    }
+
+
+
+    public function downloadTrainingReport(Request $request)
+    {
+        $employeeInfo    = Employee::with('department')->where('employee_id', $request->employee_id)->first();
+        $results         = $this->employeeTrainingDataFormat($request->employee_id);
+        $printHead       = PrintHeadSetting::first();
+
+        $data = [
+            'results'   => $results,
+            'printHead' => $printHead,
+            'employee_name' => $employeeInfo->first_name . ' ' . $employeeInfo->last_name,
+            'department_name' => $employeeInfo->department->department_name,
+        ];
+
+        $pdf = PDF::loadView('admin.training.report.pdf.employeeTrainingReportPdf', $data);
+        $pdf->setPaper('A4', 'landscape');
+        $pageName = "training.pdf";
+        return $pdf->download($pageName);
+    }
+
+    public function dateFilterTrainingReport(Request $request)
+    {
+        $from_date = dateConvertFormtoDB($request->from_date);
+        $to_date = dateConvertFormtoDB($request->to_date);
+        
+        if($from_date == null or $to_date == null){
+            return redirect()->back()->with('error','Requested date is empty.');
+        }
+
+        $totalEmployee = DB::table('employee')->count();
+
+        $traningInfo = DB::table('training_info')
+            ->select('training_info.*', 'training_type.training_type_name as training_type_name', DB::raw("CONCAT(employee.first_name,' ',employee.last_name) as full_name"))
+            ->join('training_type', 'training_info.training_type_id', '=', 'training_type.training_type_id')
+            ->join('employee', 'training_info.employee_id', '=', 'employee.employee_id')
+            ->where('training_info.start_date', '>=',$from_date)
+            ->Where('training_info.end_date', '<=', $to_date)
+            ->get();
+        // dd($traningInfo, $from_date, $to_date);
+
+        // $pdf = PDF::loadView('admin.training.report.pdf.allEmployeeTrainingReportPdf', compact('traningInfo', 'from_date', 'to_date', 'totalEmployee'));
+        // $pdf->setPaper('A4', 'landscape');
+        // $pageName = "all-employee-training-report.pdf";
+        // return $pdf->download($pageName);
+        //return $pdf->stream($pageName);
+
+        // dd($traningInfo);
+        return view('admin.training.report.pdf.allEmployeeTrainingReportPdf', compact('traningInfo', 'from_date', 'to_date', 'totalEmployee'));
+    }
+}
